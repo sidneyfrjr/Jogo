@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Réptil que segue o cursor</title>
+  <style>
+    :root{
+      --bg: #0b1020;
+      --bg2: #101935;
+      --green: #34d399;
+      --green-d: #059669;
+      --eye: #f9fafb;
+      --pupil: #0f172a;
+      --scale: rgba(255,255,255,.08);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0}
+    body{
+      background: radial-gradient(1200px 800px at 70% -10%, #223, transparent),
+                  radial-gradient(800px 600px at 10% 110%, #132, transparent),
+                  linear-gradient(180deg,var(--bg),var(--bg2));
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      color:#e5e7eb;
+      overflow:hidden;
+    }
+    .stage{
+      position:relative;
+      width:100vw;height:100vh;
+      cursor: none; /* opcional: esconde o cursor p/ ficar mais imersivo */
+    }
+    .hint{
+      position:absolute;left:50%;top:30px;transform:translateX(-50%);
+      opacity:.8;letter-spacing:.3px
+    }
+    svg{width:100%;height:100%;display:block}
+
+    /* brilho suave do réptil */
+    .glow{filter: drop-shadow(0 6px 14px rgba(52,211,153,.35)) drop-shadow(0 0 30px rgba(16,185,129,.15));}
+
+    /* animação de respirar quando o mouse não está por perto */
+    .breath{animation:breath 3.4s ease-in-out infinite}
+    @keyframes breath{50%{transform:scale(1.02)}}
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage" aria-label="Área interativa: passe o mouse para o réptil seguir o cursor.">
+    <div class="hint">Passe o mouse — o réptil te segue 🦎</div>
+    <svg viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice">
+      <defs>
+        <radialGradient id="bodyGrad" cx="50%" cy="40%" r="70%">
+          <stop offset="0%" stop-color="var(--green)" />
+          <stop offset="70%" stop-color="var(--green-d)" />
+          <stop offset="100%" stop-color="#044a3a" />
+        </radialGradient>
+        <pattern id="scales" width="20" height="20" patternUnits="userSpaceOnUse">
+          <circle cx="10" cy="10" r="8" fill="var(--scale)"/>
+        </pattern>
+        <mask id="scaleMask">
+          <rect x="0" y="0" width="100%" height="100%" fill="white"/>
+          <!-- olhos ficam fora das escamas para destacar -->
+          <circle id="maskEyeL" cx="0" cy="0" r="26" fill="black"/>
+          <circle id="maskEyeR" cx="0" cy="0" r="26" fill="black"/>
+        </mask>
+      </defs>
+      <g id="reptile" class="glow breath"></g>
+    </svg>
+  </div>
+
+  <script>
+    (() => {
+      const STAGE = document.getElementById('stage');
+      const SVGNS = 'http://www.w3.org/2000/svg';
+      const reptile = document.getElementById('reptile');
+
+      const view = { w: 1200, h: 800 };
+      let mouse = { x: view.w*0.6, y: view.h*0.6, inside:false };
+
+      // Configurações do corpo (tipo cobra/lagarto estilizado)
+      const SEGMENTS = 26;           // quantidade de segmentos
+      const BASE = 28;               // raio base do corpo
+      const SPACING = 18;            // distância entre segmentos
+      const FOLLOW = 0.22;           // rapidez que cada segmento segue o anterior
+      const HEAD_EASE = 0.12;        // rapidez do head rumo ao alvo
+
+      const parts = []; // cada item: {g,circle,x,y,r,angle}
+
+      // Grupo raiz do corpo
+      const bodyG = document.createElementNS(SVGNS,'g');
+      bodyG.setAttribute('id','body');
+      reptile.appendChild(bodyG);
+
+      // adicionar segmentos do corpo (do maior para o menor)
+      for(let i=0;i<SEGMENTS;i++){
+        const r = BASE * Math.pow(0.92, i) * (i===0 ? 1.1 : 1); // cabeça um pouco maior
+        const g = document.createElementNS(SVGNS,'g');
+        const c = document.createElementNS(SVGNS,'circle');
+        c.setAttribute('r', r);
+        c.setAttribute('fill', 'url(#bodyGrad)');
+        c.setAttribute('stroke', 'rgba(0,0,0,.25)');
+        c.setAttribute('stroke-width', i===0 ? 2 : 1);
+
+        // escamas sutis
+        const scales = document.createElementNS(SVGNS,'rect');
+        scales.setAttribute('x', -r);
+        scales.setAttribute('y', -r);
+        scales.setAttribute('width', r*2);
+        scales.setAttribute('height', r*2);
+        scales.setAttribute('fill', 'url(#scales)');
+        scales.setAttribute('mask', 'url(#scaleMask)');
+
+        g.appendChild(c);
+        g.appendChild(scales);
+
+        bodyG.appendChild(g);
+        parts.push({ g, c, x: view.w*0.5 + i*SPACING, y: view.h*0.5, r, angle:0 });
+      }
+
+      // Cabeça: olhos e pupilas
+      const head = parts[0];
+      const headG = head.g;
+
+      const eyeL = document.createElementNS(SVGNS,'circle');
+      const eyeR = document.createElementNS(SVGNS,'circle');
+      eyeL.setAttribute('r','26');
+      eyeR.setAttribute('r','26');
+      eyeL.setAttribute('fill','var(--eye)');
+      eyeR.setAttribute('fill','var(--eye)');
+
+      const pupilL = document.createElementNS(SVGNS,'circle');
+      const pupilR = document.createElementNS(SVGNS,'circle');
+      pupilL.setAttribute('r','9');
+      pupilR.setAttribute('r','9');
+      pupilL.setAttribute('fill','var(--pupil)');
+      pupilR.setAttribute('fill','var(--pupil)');
+
+      const tongue = document.createElementNS(SVGNS,'path');
+      tongue.setAttribute('stroke','#ef4444');
+      tongue.setAttribute('stroke-width','4');
+      tongue.setAttribute('fill','none');
+      tongue.setAttribute('stroke-linecap','round');
+
+      headG.appendChild(tongue);
+      headG.appendChild(eyeL);
+      headG.appendChild(eyeR);
+      headG.appendChild(pupilL);
+      headG.appendChild(pupilR);
+
+      // atualiza posições iniciais
+      parts.forEach((p,i)=>{
+        p.g.setAttribute('transform',`translate(${p.x} ${p.y})`);
+      });
+
+      // ponteiro fantasma p/ mostrar onde está o cursor (opcional)
+      const ghost = document.createElementNS(SVGNS,'circle');
+      ghost.setAttribute('r','6');
+      ghost.setAttribute('fill','rgba(255,255,255,.15)');
+      ghost.setAttribute('stroke','rgba(255,255,255,.35)');
+      ghost.setAttribute('stroke-width','1');
+      ghost.style.opacity = '0';
+      reptile.appendChild(ghost);
+
+      // listeners
+      const toLocal = (evt) => {
+        const rect = STAGE.getBoundingClientRect();
+        // converter para o viewBox (1200x800)
+        const x = (evt.clientX - rect.left) * (view.w / rect.width);
+        const y = (evt.clientY - rect.top) * (view.h / rect.height);
+        return {x,y};
+      };
+
+      STAGE.addEventListener('mouseenter', () => { mouse.inside = true; reptile.classList.remove('breath'); ghost.style.opacity = '1'; });
+      STAGE.addEventListener('mouseleave', () => { mouse.inside = false; reptile.classList.add('breath'); ghost.style.opacity = '0'; });
+      STAGE.addEventListener('mousemove', (e) => { const p = toLocal(e); mouse.x = p.x; mouse.y = p.y; });
+
+      // animação
+      let t = 0; // tempo
+      function animate(){
+        t += 0.016;
+        const target = { x: mouse.x, y: mouse.y };
+
+        if(!mouse.inside){
+          // quando fora, o alvo segue uma pequena trajetória tipo "serpenteando" perto da cabeça
+          const last = parts[0];
+          target.x = last.x + Math.cos(t*1.4)*70;
+          target.y = last.y + Math.sin(t*0.9)*40;
+        }
+
+        // cabeça vai em direção ao alvo
+        const dx = target.x - head.x;
+        const dy = target.y - head.y;
+        const angle = Math.atan2(dy, dx);
+        head.angle = angle;
+        head.x += dx * HEAD_EASE;
+        head.y += dy * HEAD_EASE;
+
+        // língua (projeta à frente da cabeça com vibração)
+        const tipX = head.x + Math.cos(angle) * (head.r + 34 + Math.sin(t*40)*3);
+        const tipY = head.y + Math.sin(angle) * (head.r + 34 + Math.sin(t*40)*3);
+        const fork = 8;
+        const midX = head.x + Math.cos(angle) * (head.r + 16);
+        const midY = head.y + Math.sin(angle) * (head.r + 16);
+        const leftX = tipX + Math.cos(angle + 0.5) * fork;
+        const leftY = tipY + Math.sin(angle + 0.5) * fork;
+        const rightX = tipX + Math.cos(angle - 0.5) * fork;
+        const rightY = tipY + Math.sin(angle - 0.5) * fork;
+        tongue.setAttribute('d', `M ${midX} ${midY} Q ${head.x + Math.cos(angle)*(head.r+8)} ${head.y + Math.sin(angle)*(head.r+8)} ${tipX} ${tipY} M ${tipX} ${tipY} L ${leftX} ${leftY} M ${tipX} ${tipY} L ${rightX} ${rightY}`);
+
+        // posiciona olhos na cabeça
+        const eyeOffsetX = Math.cos(angle) * 8 - Math.sin(angle) * 16;
+        const eyeOffsetY = Math.sin(angle) * 8 + Math.cos(angle) * 16;
+        const eyeBaseX = head.x + Math.cos(angle) * (head.r*0.45);
+        const eyeBaseY = head.y + Math.sin(angle) * (head.r*0.45);
+        const eyeSep = 34;
+        const exL = eyeBaseX - Math.sin(angle) * eyeSep + eyeOffsetX;
+        const eyL = eyeBaseY + Math.cos(angle) * eyeSep + eyeOffsetY;
+        const exR = eyeBaseX + Math.sin(angle) * eyeSep + eyeOffsetX;
+        const eyR = eyeBaseY - Math.cos(angle) * eyeSep + eyeOffsetY;
+        eyeL.setAttribute('cx', exL); eyeL.setAttribute('cy', eyL);
+        eyeR.setAttribute('cx', exR); eyeR.setAttribute('cy', eyR);
+
+        // pupilas "olham" para o alvo
+        const look = (cx, cy) => {
+          const pdx = target.x - cx;
+          const pdy = target.y - cy;
+          const plen = Math.hypot(pdx, pdy) || 1;
+          const max = 10; // limite dentro do olho
+          return { x: cx + (pdx/plen)*max, y: cy + (pdy/plen)*max };
+        };
+        const pL = look(exL, eyL);
+        const pR = look(exR, eyR);
+        pupilL.setAttribute('cx', pL.x); pupilL.setAttribute('cy', pL.y);
+        pupilR.setAttribute('cx', pR.x); pupilR.setAttribute('cy', pR.y);
+
+        // atualizar máscara que remove escamas na área dos olhos
+        const maskEyeL = document.getElementById('maskEyeL');
+        const maskEyeR = document.getElementById('maskEyeR');
+        maskEyeL.setAttribute('cx', exL); maskEyeL.setAttribute('cy', eyL);
+        maskEyeR.setAttribute('cx', exR); maskEyeR.setAttribute('cy', eyR);
+
+        // segmentos seguintes seguem o anterior
+        for(let i=1;i<parts.length;i++){
+          const prev = parts[i-1];
+          const seg = parts[i];
+          const ddx = prev.x - seg.x;
+          const ddy = prev.y - seg.y;
+          const dist = Math.hypot(ddx, ddy) || 1;
+          const desired = SPACING + (prev.r - seg.r)*0.5; // espaçamento proporcional ao tamanho
+          const nx = ddx / dist;
+          const ny = ddy / dist;
+          // alvo do segmento fica a uma distância "desired" atrás do anterior
+          const tx = prev.x - nx * desired;
+          const ty = prev.y - ny * desired;
+          seg.x += (tx - seg.x) * FOLLOW;
+          seg.y += (ty - seg.y) * FOLLOW;
+          seg.angle = Math.atan2(seg.y - prev.y, seg.x - prev.x);
+        }
+
+        // aplicar transformações às camadas
+        parts.forEach((p)=>{
+          p.g.setAttribute('transform', `translate(${p.x} ${p.y})`);
+        });
+
+        // sombra/ghost do cursor
+        ghost.setAttribute('cx', target.x);
+        ghost.setAttribute('cy', target.y);
+
+        requestAnimationFrame(animate);
+      }
+
+      // iniciar
+      requestAnimationFrame(animate);
+
+      // acessibilidade: reexibe cursor se usuário preferir redução de movimento
+      if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+        STAGE.style.cursor = 'auto';
+      }
+
+      // torna responsivo ao redimensionar (mantendo viewBox)
+      const onResize = () => { /* viewBox já cuida; este placeholder existe para evolução */ };
+      window.addEventListener('resize', onResize);
+    })();
+  </script>
+</body>
+</html>
